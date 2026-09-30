@@ -1,7 +1,7 @@
 """PayWay notification ledger. Python standard library only; run one instance."""
 import os, re, json, sqlite3, signal, threading, logging, secrets
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from zoneinfo import ZoneInfo
 from urllib.request import Request, urlopen
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -62,13 +62,23 @@ def record(db, payment, message_id):
 
 def report(db, start, end):
     rows=db.execute('SELECT currency,COUNT(*),SUM(cents) FROM payments WHERE day>=? AND day<=? GROUP BY currency',(start,end)).fetchall()
-    lines=['📊 ADPrint — PayWay',f'📅 {start}' + (f' → {end}' if end!=start else ''),'សរុបសារទូទាត់ដែល Bot បានកត់ត្រា៖']
     totals={c:(n,v) for c,n,v in rows}
-    for c in ('USD','KHR'):
-        n,v=totals.get(c,(0,0))
-        lines.append(f'{c}: {Decimal(v)/100:,.2f} | {n} ប្រតិបត្តិការ')
+    usd_n,usd=totals.get('USD',(0,0))
+    khr_n,khr=totals.get('KHR',(0,0))
+    def money(cents):
+        return f'{Decimal(cents)/100:,.2f}'.rstrip('0').rstrip('.')
+    total_usd=(Decimal(usd)/100 + Decimal(khr)/100/4000).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    today=datetime.now(TZ).date().isoformat()
+    title='របាយការណ៍លក់ថ្ងៃនេះ' if start==end==today else 'របាយការណ៍លក់'
+    lines=[title, f'📅 {start}' + (f' → {end}' if start!=end else ''),
+           f'សរុបលក់ $ : {money(usd)} | {usd_n} ប្រតិបត្តិការ',
+           f'សរុបលក់ ៛ : {money(khr)} | {khr_n} ប្រតិបត្តិការ',
+           '…………..',
+           f'សរុបទឹកប្រាក់ : ${total_usd:,.2f}',
+           f'សរុបប្រតិបត្តិការ : {usd_n+khr_n}']
     issues=db.execute('SELECT COUNT(*) FROM issues WHERE day>=? AND day<=?',(start,end)).fetchone()[0]
-    lines.extend([f'⚠️ សារត្រូវពិនិត្យ៖ {issues}',f'ចាប់ផ្តើមកត់ត្រា៖ {get(db,"started","—")}', 'សរុបនេះតាមសារ Telegram; ផ្ទៀងផ្ទាត់ជាមួយ ABA។'])
+    if issues:
+        lines.append(f'⚠️ សារត្រូវពិនិត្យ៖ {issues}')
     return '\n'.join(lines)
 
 class Bot:
@@ -142,7 +152,6 @@ class Bot:
         due=datetime(day.year,day.month,day.day,17,30,tzinfo=TZ)
         if now>=due:
             text=report(self.db,day.isoformat(),day.isoformat())
-            text+='\n🕠 របាយការណ៍ម៉ោង 17:30 — សរុបតាមសារដែលបានកត់ត្រាត្រឹមពេលផ្ញើ។'
             self.send(int(group),text)
             with self.db:
                 put(self.db,'next_evening_report',(day+timedelta(days=1)).isoformat())
@@ -205,4 +214,5 @@ def main():
         db.close()
 
 if __name__=='__main__': main()
+
 
