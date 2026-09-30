@@ -102,7 +102,7 @@ class Bot:
                 put(self.db,'group',chat); put(self.db,'source',author['id'])
                 put(self.db,'started',datetime.now(TZ).isoformat(timespec='minutes'))
                 put(self.db,'last_report',datetime.now(TZ).date().isoformat())
-            self.send(chat,'✅ ភ្ជាប់រួច។ Bot ចាប់ផ្តើមកត់ត្រាសារ PayWay ថ្មី។ /today /yesterday /month /status\nរបាយការណ៍ថ្ងៃមុន ផ្ញើម៉ោង 00:05។ សារចាស់មិនត្រូវបាននាំចូលទេ។')
+            self.send(chat,'✅ ភ្ជាប់រួច។ Bot ចាប់ផ្តើមកត់ត្រាសារ PayWay ថ្មី។ /today /yesterday /month /status\nរបាយការណ៍ថ្ងៃនេះ ផ្ញើម៉ោង 17:30 ម៉ោងកម្ពុជា។ សារចាស់មិនត្រូវបាននាំចូលទេ។')
             return
         if str(chat)!=group:
             return
@@ -127,16 +127,25 @@ class Bot:
             if command=='/month': start=today.replace(day=1)
             self.send(chat,report(self.db,start.isoformat(),end.isoformat()))
         elif command=='/status':
-            self.send(chat,'✅ Bot running\nចាប់ផ្តើម៖ '+get(self.db,'started','—')+'\nរបាយការណ៍ថ្ងៃមុន៖ 00:05 ម៉ោងកម្ពុជា\nមិនរួមបញ្ចូលប្រវត្តិមុនភ្ជាប់ ឬសារដែល Bot មិនបានទទួល។')
+            self.send(chat,'✅ Bot running\nចាប់ផ្តើម៖ '+get(self.db,'started','—')+'\nរបាយការណ៍ថ្ងៃនេះ៖ 17:30 ម៉ោងកម្ពុជា\nមិនរួមបញ្ចូលប្រវត្តិមុនភ្ជាប់ ឬសារដែល Bot មិនបានទទួល។')
     def scheduled(self):
         now=datetime.now(TZ)
-        group=get(self.db,'group'); last=get(self.db,'last_report')
-        if not group or not last or (now.hour==0 and now.minute<5): return
-        day=datetime.fromisoformat(last).date()
-        # Catch up full-day reports after restarts; Telegram send can rarely duplicate after a crash.
-        if day<now.date():
-            self.send(int(group),report(self.db,day.isoformat(),day.isoformat()))
-            with self.db: put(self.db,'last_report',(day+timedelta(days=1)).isoformat())
+        group=get(self.db,'group')
+        if not group:
+            return
+        # Separate checkpoint migrates the old midnight schedule safely.
+        next_day=get(self.db,'next_evening_report')
+        if not next_day:
+            next_day=now.date().isoformat()
+            with self.db: put(self.db,'next_evening_report',next_day)
+        day=datetime.fromisoformat(next_day).date()
+        due=datetime(day.year,day.month,day.day,17,30,tzinfo=TZ)
+        if now>=due:
+            text=report(self.db,day.isoformat(),day.isoformat())
+            text+='\n🕠 របាយការណ៍ម៉ោង 17:30 — សរុបតាមសារដែលបានកត់ត្រាត្រឹមពេលផ្ញើ។'
+            self.send(int(group),text)
+            with self.db:
+                put(self.db,'next_evening_report',(day+timedelta(days=1)).isoformat())
 
 class HealthHandler(BaseHTTPRequestHandler):
     """Generic liveness only; never serve files, configuration or ledger data."""
@@ -196,3 +205,4 @@ def main():
         db.close()
 
 if __name__=='__main__': main()
+
