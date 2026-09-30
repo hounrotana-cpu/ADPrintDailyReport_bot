@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 from urllib.request import Request, urlopen
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 TZ = ZoneInfo('Asia/Phnom_Penh')
 STOP = threading.Event()
@@ -137,6 +138,33 @@ class Bot:
             self.send(int(group),report(self.db,day.isoformat(),day.isoformat()))
             with self.db: put(self.db,'last_report',(day+timedelta(days=1)).isoformat())
 
+class HealthHandler(BaseHTTPRequestHandler):
+    """Generic liveness only; never serve files, configuration or ledger data."""
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(5)
+    def do_GET(self):
+        known = self.path in ('/', '/healthz')
+        status = (503 if STOP.is_set() else 200) if known else 404
+        body = b'OK\n' if status == 200 else b'Unavailable\n'
+        self.send_response(status)
+        self.send_header('Content-Type', 'text/plain; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+        if self.command != 'HEAD':
+            self.wfile.write(body)
+    do_HEAD = do_GET
+    def log_message(self, *args):
+        pass
+
+def start_health_server():
+    if not os.environ.get('PORT'):
+        return None
+    server = ThreadingHTTPServer(('0.0.0.0', int(os.environ['PORT'])), HealthHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
 def main():
     token=os.environ['BOT_TOKEN']; setup=os.environ['SETUP_CODE']
     if len(setup)<12: raise SystemExit('SETUP_CODE needs at least 12 characters')
@@ -147,18 +175,24 @@ def main():
         raise SystemExit('Existing webhook found. Use a dedicated bot with no webhook.')
     logging.basicConfig(level=logging.INFO)
     for s in (signal.SIGTERM,signal.SIGINT): signal.signal(s,lambda *_:STOP.set())
+    server = start_health_server()
     logging.info('Worker started; waiting for configured group messages.')
-    while not STOP.is_set():
-        try:
-            updates=bot.api('getUpdates',offset=int(get(db,'offset','0')),timeout=10,allowed_updates=['message','edited_message'])
-            for update in updates:
-                bot.handle(update)
-                with db: put(db,'offset',update['update_id']+1)
-            # Report only after draining pending messages, to avoid premature totals.
-            if len(updates)<100: bot.scheduled()
-        except Exception as exc:
-            logging.error('Worker request failed (%s); retrying. No credentials logged.',type(exc).__name__)
-            STOP.wait(5)
-    db.close()
+    try:
+        while not STOP.is_set():
+            try:
+                updates=bot.api('getUpdates',offset=int(get(db,'offset','0')),timeout=10,allowed_updates=['message','edited_message'])
+                for update in updates:
+                    bot.handle(update)
+                    with db: put(db,'offset',update['update_id']+1)
+                # Report only after draining pending messages, to avoid premature totals.
+                if len(updates)<100: bot.scheduled()
+            except Exception as exc:
+                logging.error('Worker request failed (%s); retrying. No credentials logged.',type(exc).__name__)
+                STOP.wait(5)
+    finally:
+        if server:
+            server.shutdown()
+            server.server_close()
+        db.close()
 
 if __name__=='__main__': main()
