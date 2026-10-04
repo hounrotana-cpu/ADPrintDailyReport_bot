@@ -186,6 +186,11 @@ def start_health_server():
 def main():
     token=os.environ['BOT_TOKEN']; setup=os.environ['SETUP_CODE']
     if len(setup)<12: raise SystemExit('SETUP_CODE needs at least 12 characters')
+    sales_token=os.environ.get('SALES_BOT_TOKEN','')
+    if sales_token and sales_token == token:
+        raise SystemExit('SALES_BOT_TOKEN must differ from BOT_TOKEN')
+    if sales_token and not os.environ.get('OPENAI_API_KEY'):
+        raise SystemExit('Sales bot requires OPENAI_API_KEY')
     path=os.environ.get('DB_PATH','data/payway.sqlite3')
     os.makedirs(os.path.dirname(os.path.abspath(path)),exist_ok=True)
     db=database(path); bot=Bot(token,db,setup)
@@ -194,6 +199,10 @@ def main():
     logging.basicConfig(level=logging.INFO)
     for s in (signal.SIGTERM,signal.SIGINT): signal.signal(s,lambda *_:STOP.set())
     server = start_health_server()
+    if sales_token:
+        import sales_assistant
+        sales_thread = threading.Thread(target=sales_assistant.run, args=(STOP,), daemon=True)
+        sales_thread.start()
     logging.info('Worker started; waiting for configured group messages.')
     try:
         while not STOP.is_set():
