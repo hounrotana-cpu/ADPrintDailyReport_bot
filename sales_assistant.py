@@ -91,6 +91,7 @@ def handle(update):
         return
     last_used[user] = time.monotonic()
         stage = 'OpenAI'
+    try:
         reply = answer((chat, user), text)
         stage = 'Telegram'
         send(chat, reply)
