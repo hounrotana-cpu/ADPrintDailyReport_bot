@@ -90,7 +90,7 @@ def handle(update):
         send(chat, 'សូមរង់ចាំបន្តិច មុនសួរបន្ទាប់។')
         return
     last_used[user] = time.monotonic()
-        stage = 'OpenAI'
+    stage = 'OpenAI'
     try:
         reply = answer((chat, user), text)
         stage = 'Telegram'
