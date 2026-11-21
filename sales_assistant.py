@@ -90,10 +90,14 @@ def handle(update):
         send(chat, 'សូមរង់ចាំបន្តិច មុនសួរបន្ទាប់។')
         return
     last_used[user] = time.monotonic()
+        stage = 'OpenAI'
     try:
-        send(chat, answer((chat, user), text))
+        reply = answer((chat, user), text)
+        stage = 'Telegram'
+        send(chat, reply)
     except Exception as error:
-        print('AI/send failed:', type(error).__name__, flush=True)
+        status = getattr(error, 'code', None)
+        print(f'{stage} failed: {type(error).__name__}, HTTP={status}', flush=True)
         send(chat, 'មិនអាចឆ្លើយបានបណ្ដោះអាសន្ន។ សូមសាកម្ដងទៀត ឬទាក់ទងអ្នកគ្រប់គ្រង។')
 
 def run(stop):
